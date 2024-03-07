@@ -1,0 +1,152 @@
+name: "Build docker image and deploy to AWS ECR-EKS"
+description: "Build docker image and deploy to AWS ECR-EKS"
+inputs:
+  DOCKER_FILE:
+    description: "Value of docker build --file parameter."
+    required: false
+    default: "Dockerfile"
+  DOCKER_FOLDER:
+    description: "Root directory for docker build"
+    required: false
+    default: "."
+  ECR_REPOSITORY:
+    description: "Name of ECR repository image"
+    required: true
+  EKS_DEPLOYMENT:
+    description: "Name of EKS deployment"
+    required: true
+  AWS_ACCESS_KEY_ID:
+    description: "AWS prod access key"
+    required: true
+  AWS_SECRET_ACCESS_KEY:
+    description: "AWS prod secret key"
+    required: true
+  AWS_ACCESS_KEY_ID_DEV_UAT:
+    description: "AWS dev & uat access key"
+    required: true
+  AWS_SECRET_ACCESS_KEY_DEV_UAT:
+    description: "AWS dev & uat secret key"
+    required: true
+  AWS_REGION:
+    description: "AWS region"
+    required: true
+  NPM_TOKEN:
+    description: "NPM token"
+    required: true
+  KUBERNETES_APISERVER:
+    description: "K8S api server url"
+    required: true
+  KUBERNETES_SECRET:
+    description: "K8S user secret"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract Branch Name
+      shell: bash
+      run: |
+        BRANCH=${GITHUB_REF##*/}
+        if [ "$BRANCH" = "prod" ] ; then
+          echo "ENV=prod" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=eks-hub-schlieger-prod" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+        elif [ "$BRANCH" = "uat" ] ; then
+          echo "ENV=uat" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=eks-hub-schlieger-uat" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+        elif [ "$BRANCH" = "new-uat" ] ; then 
+          echo "ENV=uat" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=schlieger-uat" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+        elif [ "$BRANCH" = "feature1" ] ; then 
+          echo "ENV=feature1" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=schlieger-dev-feature1" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+        elif [ "$BRANCH" = "feature2" ] ; then 
+          echo "ENV=feature2" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=schlieger-dev-feature2" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+        elif [ "$BRANCH" = "nethost" ] ; then 
+          echo "ENV=nethost" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+        else
+          echo "ENV=develop" >> $GITHUB_ENV
+          echo "EKS_CLUSTER=schlieger-dev" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+        fi
+        
+    - name: Authenticate to AWS Dev & UAT
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ env.AWS_ACCESS_KEY }}
+        aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ inputs.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Copy .env
+      shell: bash
+      run: |
+        if [ -e ".env.${ENV}" ]
+        then
+          cp -v ".env.${ENV}" .env
+          cat .env
+        fi
+
+    - name: Make sure, ECR repository exists
+      shell: bash
+      run: |
+        aws ecr describe-repositories --repository-names ${{ inputs.ECR_REPOSITORY }} || aws ecr create-repository --repository-name ${{ inputs.ECR_REPOSITORY }}
+
+    - name: Build, tag, and push image to Amazon ECR
+      shell: bash
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        # Build image 
+        docker build --tag $ECR_REGISTRY/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA} --build-arg NODE_AUTH_TOKEN=${{ inputs.NPM_TOKEN }} --file ${{ inputs.DOCKER_FILE }} ${{ inputs.DOCKER_FOLDER }} 
+        docker image tag $ECR_REGISTRY/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA} $ECR_REGISTRY/${{ inputs.ECR_REPOSITORY }}:${ENV}
+
+        # Push image 
+        docker push $ECR_REGISTRY/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA}        
+        docker push $ECR_REGISTRY/${{ inputs.ECR_REPOSITORY }}:${ENV}
+
+        # Wait 30 seconds
+        sleep 30
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: "v1.29.0"
+      id: install
+
+    - name: Set the Kubernetes context
+      uses: azure/k8s-set-context@v2
+      with:
+        method: service-account
+        k8s-url: ${{ inputs.KUBERNETES_APISERVER }}
+        k8s-secret: ${{ inputs.KUBERNETES_SECRET }}
+
+    - name: Deploy image
+      shell: bash
+      run: |
+        kubectl apply -f k8s/deployment.${ENV}.yml
+        kubectl apply -f k8s/service.yml
+        kubectl apply -f k8s/ingress.${ENV}.yml
+        if [ -f "k8s/secret.${ENV}.yml" ]; then
+          kubectl apply -f k8s/secret.${ENV}.yml
+        fi
+
+    - name: Restart rollout deployment
+      shell: bash
+      run: kubectl rollout restart deployment ${{ inputs.EKS_DEPLOYMENT }}
