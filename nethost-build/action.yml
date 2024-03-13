@@ -88,14 +88,12 @@ runs:
       shell: bash
       id: base64decode
       run: |
-        echo -n "${{ inputs.KUBERNETES_SECRET }}" | base64 -d
-        delimiter="$(openssl rand -hex 8)"
         {
-          echo "KUBERNETES_SECRET<<${delimiter}"
+          echo "KUBERNETES_SECRET<<EOF"
           echo -n "${{ inputs.KUBERNETES_SECRET }}" | base64 -d
-          echo "${delimiter}"
+          echo ""
+          echo "EOF"
         } >> $GITHUB_ENV
-
 
     - name: Set the Kubernetes context
       uses: azure/k8s-set-context@v2
