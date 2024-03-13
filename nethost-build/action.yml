@@ -1,5 +1,5 @@
-name: "Build docker image and deploy to AWS ECR-EKS"
-description: "Build docker image and deploy to AWS ECR-EKS"
+name: "Build docker image and deploy to Nethost"
+description: "Build docker image and deploy to Nethost"
 inputs:
   DOCKER_FILE:
     description: "Value of docker build --file parameter."
@@ -10,25 +10,10 @@ inputs:
     required: false
     default: "."
   ECR_REPOSITORY:
-    description: "Name of ECR repository image"
+    description: "Name of repository image"
     required: true
   EKS_DEPLOYMENT:
-    description: "Name of EKS deployment"
-    required: true
-  AWS_ACCESS_KEY_ID:
-    description: "AWS prod access key"
-    required: true
-  AWS_SECRET_ACCESS_KEY:
-    description: "AWS prod secret key"
-    required: true
-  AWS_ACCESS_KEY_ID_DEV_UAT:
-    description: "AWS dev & uat access key"
-    required: true
-  AWS_SECRET_ACCESS_KEY_DEV_UAT:
-    description: "AWS dev & uat secret key"
-    required: true
-  AWS_REGION:
-    description: "AWS region"
+    description: "Name of deployment"
     required: true
   NPM_TOKEN:
     description: "NPM token"
@@ -39,6 +24,15 @@ inputs:
   KUBERNETES_SECRET:
     description: "K8S user secret"
     required: true
+  HARBOR_USERNAME:
+    description: "Harbor repo username"
+    required: true
+  HARBOR_PASSWORD:
+    description: "Harbor repo password"
+    required: true
+  HARBOR_HOST:
+    description: "Harbor repo hostname"
+    required: true
 
 runs:
   using: "composite"
@@ -47,46 +41,43 @@ runs:
       shell: bash
       run: |
         BRANCH=${GITHUB_REF##*/}
-        if [ "$BRANCH" = "prod" ] ; then
-          echo "ENV=prod" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=eks-hub-schlieger-prod" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "uat" ] ; then
-          echo "ENV=uat" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=eks-hub-schlieger-uat" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "new-uat" ] ; then 
-          echo "ENV=uat" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=schlieger-uat" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "feature1" ] ; then 
-          echo "ENV=feature1" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=schlieger-dev-feature1" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "feature2" ] ; then 
-          echo "ENV=feature2" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=schlieger-dev-feature2" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "main" ] ; then
+        if [ "$BRANCH" = "nethost" ] ; then 
           echo "ENV=nethost" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
-        elif [ "$BRANCH" = "nethost" ] ; then 
-          echo "ENV=nethost" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
         else
-          echo "ENV=develop" >> $GITHUB_ENV
-          echo "EKS_CLUSTER=schlieger-dev" >> $GITHUB_ENV
-          echo "AWS_ACCESS_KEY=${{ inputs.AWS_ACCESS_KEY_ID_DEV_UAT }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ inputs.AWS_SECRET_ACCESS_KEY_DEV_UAT }}" >> $GITHUB_ENV
+          echo "unexpected branch, exiting"
+          exit
         fi
         
+    - uses: docker/login-action@v1
+      with:
+        registry: ${{ inputs.HARBOR_HOST  }}
+        username: ${{ inputs.HARBOR_USERNAME  }}
+        password: ${{ inputs.HARBOR_PASSWORD }}
+
+    - name: Copy .env
+      shell: bash
+      run: |
+        if [ -e ".env.${ENV}" ]
+        then
+          cp -v ".env.${ENV}" .env
+          cat .env
+        fi
+
+
+    - name: Build, tag, and push image
+      shell: bash
+      run: |
+        # Build image 
+        docker build --tag  ${{ inputs.HARBOR_HOST  }}/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA} --build-arg NODE_AUTH_TOKEN=${{ inputs.NPM_TOKEN }} --file ${{ inputs.DOCKER_FILE }} ${{ inputs.DOCKER_FOLDER }} 
+        docker image tag  ${{ inputs.HARBOR_HOST  }}/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA}  ${{ inputs.HARBOR_HOST  }}/${{ inputs.ECR_REPOSITORY }}:${ENV}
+
+        # Push image 
+        docker push  ${{ inputs.HARBOR_HOST  }}/${{ inputs.ECR_REPOSITORY }}:${GITHUB_SHA}        
+        docker push  ${{ inputs.HARBOR_HOST  }}/${{ inputs.ECR_REPOSITORY }}:${ENV}
+
+        # Wait 30 seconds
+        sleep 30
+
     - name: Install kubectl
       uses: azure/setup-kubectl@v3
       with:
