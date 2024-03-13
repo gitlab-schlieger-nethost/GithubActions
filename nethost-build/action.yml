@@ -90,7 +90,7 @@ runs:
       run: |
         echo "KUBERNETES_SECRET<<EOF" >> $GITHUB_ENV
         echo -n "${{ inputs.KUBERNETES_SECRET }}" | base64 -d >> "$GITHUB_ENV"
-        echo "EOF" >> $GITHUB_ENV
+        echo "\nEOF" >> $GITHUB_ENV
 
     - name: Set the Kubernetes context
       uses: azure/k8s-set-context@v2
