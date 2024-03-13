@@ -48,7 +48,7 @@ runs:
           exit 1
         fi
         
-    - uses: docker/login-action@v1
+    - uses: docker/login-action@v3
       with:
         registry: ${{ inputs.HARBOR_HOST  }}
         username: ${{ inputs.HARBOR_USERNAME  }}
@@ -87,12 +87,11 @@ runs:
     - name: Retrieve the K8S secret from base64 and save to output
       shell: bash
       id: base64decode
-      env:
-        K8S-SECRET-BASE64: ${{ inputs.KUBERNETES_SECRET }}
       run: |
-        echo "${K8S-SECRET-BASE64// /}" | base64 --decode > /tmp/kubecert
-        cat /tmp/kubecert
-        echo 'KUBERNETES_SECRET=$(cat /tmp/kubecert)' >> "$GITHUB_ENV"
+	echo "${{ inputs.KUBERNETES_SECRET }}"
+        echo "{KUBERNETES_SECRET}=$(echo -n ${{ inputs.KUBERNETES_SECRET }} | base64 -w 0)" >> "$GITHUB_OUTPUT"
+        echo "$GITHUB_OUTPUT"
+
 
     - name: Set the Kubernetes context
       uses: azure/k8s-set-context@v2
