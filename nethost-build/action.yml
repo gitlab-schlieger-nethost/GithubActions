@@ -88,7 +88,7 @@ runs:
       shell: bash
       id: base64decode
       run: |
-	echo "${{ inputs.KUBERNETES_SECRET }}"
+        echo "${{ inputs.KUBERNETES_SECRET }}"
         echo "{KUBERNETES_SECRET}=$(echo -n ${{ inputs.KUBERNETES_SECRET }} | base64 -w 0)" >> "$GITHUB_OUTPUT"
         echo "$GITHUB_OUTPUT"
 
