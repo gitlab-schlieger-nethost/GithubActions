@@ -90,11 +90,9 @@ runs:
       env:
         K8S-SECRET-BASE64: ${{ inputs.KUBERNETES_SECRET }}
       run: |
-        echo "$K8S-SECRET-BASE64" | base64 --decode > /tmp/kubecert
+        echo "${K8S-SECRET-BASE64// /}" | base64 --decode > /tmp/kubecert
         cat /tmp/kubecert
         echo 'KUBERNETES_SECRET=$(cat /tmp/kubecert)' >> "$GITHUB_ENV"
-
-
 
     - name: Set the Kubernetes context
       uses: azure/k8s-set-context@v2
