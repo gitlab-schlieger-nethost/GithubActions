@@ -45,7 +45,7 @@ runs:
           echo "ENV=nethost" >> $GITHUB_ENV
         else
           echo "unexpected branch, exiting"
-          exit
+          exit 1
         fi
         
     - uses: docker/login-action@v1
