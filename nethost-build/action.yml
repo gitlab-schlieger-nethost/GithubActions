@@ -84,12 +84,24 @@ runs:
         version: "v1.29.0"
       id: install
 
+    - name: Retrieve the K8S secret from base64 and save to output
+      shell: bash
+      id: base64decode
+      env:
+        K8S-SECRET-BASE64: ${{ inputs.KUBERNETES_SECRET }}
+      run: |
+        echo "$K8S-SECRET-BASE64" | base64 --decode > /tmp/kubecert
+        cat /tmp/kubecert
+        echo 'KUBERNETES_SECRET=$(cat /tmp/kubecert)' >> "$GITHUB_ENV"
+
+
+
     - name: Set the Kubernetes context
       uses: azure/k8s-set-context@v2
       with:
         method: service-account
         k8s-url: ${{ inputs.KUBERNETES_APISERVER }}
-        k8s-secret: ${{ inputs.KUBERNETES_SECRET }}
+        k8s-secret: ${{ steps.base64decode.outputs.KUBERNETES_SECRET }}
 
     - name: Deploy image
       shell: bash
